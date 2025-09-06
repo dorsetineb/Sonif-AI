@@ -1,0 +1,5 @@
+{
+  "name": "Sonif-AI",
+  "description": "An intuitive sound effect generator. Craft unique audio up to 5 seconds long by placing notes on a horizontal timeline and adjusting their pitch on a vertical scale.",
+  "requestFramePermissions": []
+}
