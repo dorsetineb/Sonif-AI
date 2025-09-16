@@ -1,5 +1,5 @@
 {
   "name": "Sonif-AI",
-  "description": "An intuitive sound effect generator. Craft unique audio up to 5 seconds long by placing notes on a horizontal timeline and adjusting their pitch on a vertical scale.",
+  "description": "Um gerador de efeitos sonoros intuitivo. Crie áudio exclusivo de até 5 segundos de duração colocando notas em uma linha do tempo horizontal e ajustando seu tom em uma escala vertical.",
   "requestFramePermissions": []
 }

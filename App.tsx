@@ -4,7 +4,7 @@ import { Controls } from './components/Controls';
 import { EffectsPanel } from './components/EffectsPanel';
 import { audioService } from './services/audioService';
 import type { Note, Waveform, EffectsState } from './types';
-import { PITCH_NAMES, NOTE_HEIGHT } from './constants';
+import { PITCH_NAMES, PITCHES, NOTE_HEIGHT as FALLBACK_NOTE_HEIGHT } from './constants';
 
 const App: React.FC = () => {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -14,6 +14,10 @@ const App: React.FC = () => {
   const [playbackPosition, setPlaybackPosition] = useState<number>(0);
   const [waveform, setWaveform] = useState<Waveform>('square');
   const [duration, setDuration] = useState<number>(1);
+  const [isEffectsPanelOpen, setIsEffectsPanelOpen] = useState(false);
+  const [noteHeight, setNoteHeight] = useState(FALLBACK_NOTE_HEIGHT);
+  const timelineContainerRef = useRef<HTMLDivElement>(null);
+
   const [effects, setEffects] = useState<EffectsState>({
     distortion: { active: false, drive: 0.5, tone: 2500, output: 0.5 },
     panner: { active: false, pan: 0 },
@@ -27,6 +31,34 @@ const App: React.FC = () => {
   
   const animationFrameId = useRef<number | null>(null);
   const loopStartTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    const element = timelineContainerRef.current;
+    if (!element) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (element.offsetHeight > 0) {
+        setNoteHeight(element.offsetHeight / PITCHES.length);
+      }
+    });
+
+    resizeObserver.observe(element);
+    // Set initial height
+    if (element.offsetHeight > 0) {
+        setNoteHeight(element.offsetHeight / PITCHES.length);
+    }
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  const handlePreviewNote = useCallback((pitch: number) => {
+    audioService.playPreviewNote({ pitch, waveform }, effects);
+  }, [waveform, effects]);
+
+  const handlePreviewWaveform = useCallback((previewWaveform: Waveform) => {
+    const previewPitch = PITCHES[Math.floor(PITCHES.length / 2)]; // A central pitch for consistency
+    audioService.playPreviewNote({ pitch: previewPitch, waveform: previewWaveform }, effects);
+  }, [effects]);
 
   const handleStop = useCallback(() => {
     audioService.stopAll();
@@ -58,8 +90,6 @@ const App: React.FC = () => {
   
   const handlePlay = useCallback(() => {
     if (notes.length === 0) return;
-    // CRITICAL FIX: Initialize/resume AudioContext on user gesture to comply with browser autoplay policies.
-    // This is the main fix for the "no sound" bug.
     audioService.initAudioContext().then(() => {
       setIsPlaying(true);
     });
@@ -123,7 +153,7 @@ const App: React.FC = () => {
     if (notes.length === 0) return;
     setIsExporting(true);
     try {
-      await audioService.initAudioContext(); // Ensure context exists for export
+      await audioService.initAudioContext();
       await audioService.exportToWav(notes, duration, effects);
     } catch (error) {
       console.error("Failed to export WAV:", error);
@@ -136,7 +166,6 @@ const App: React.FC = () => {
     audioService.updateEffects(effects);
   }, [effects]);
   
-  // Cleanup effect to stop sound on component unmount
   useEffect(() => {
     return () => {
       handleStop();
@@ -144,14 +173,8 @@ const App: React.FC = () => {
   }, [handleStop]);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4 font-sans">
-      <header className="text-center mb-6">
-        <h1 className="text-4xl font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">
-          Sonif-AI
-        </h1>
-        <p className="text-gray-500 text-sm mt-4">Click on the grid to add a note. Click a note to remove it.</p>
-      </header>
-      <main className="flex flex-col items-center space-y-6 w-full">
+    <div className="h-screen bg-gray-900 text-white flex flex-col font-sans overflow-hidden">
+      <div className="px-4 pt-4">
         <Controls
           isPlaying={isPlaying}
           onPlay={handlePlay}
@@ -161,16 +184,22 @@ const App: React.FC = () => {
           isExporting={isExporting}
           waveform={waveform}
           setWaveform={setWaveform}
+          onPreviewWaveform={handlePreviewWaveform}
           isLooping={isLooping}
           onToggleLoop={handleToggleLoop}
           duration={duration}
           onSetDuration={handleSetDuration}
+          onToggleEffectsPanel={() => setIsEffectsPanelOpen(prev => !prev)}
         />
-        <div className="w-full max-w-5xl">
-            <div className="flex flex-row items-start space-x-2">
-                <div className="flex flex-col text-right pr-2 pt-1.5 flex-shrink-0" style={{height: PITCH_NAMES.length * NOTE_HEIGHT}}>
+      </div>
+
+      <main className="flex-grow w-full max-w-5xl mx-auto p-4 flex flex-col min-h-0">
+        <div ref={timelineContainerRef} className="flex flex-row items-start space-x-2 h-full">
+            {noteHeight > 0 && (
+              <>
+                <div className="flex flex-col text-right pr-2 flex-shrink-0" style={{paddingTop: noteHeight > 2 ? '0.375rem' : 0}}>
                     {PITCH_NAMES.map((name, index) => (
-                        <div key={index} className="text-gray-400 text-xs font-mono select-none" style={{height: NOTE_HEIGHT, lineHeight: `${NOTE_HEIGHT}px`}}>
+                        <div key={index} className="text-gray-400 text-xs font-mono select-none" style={{height: noteHeight, lineHeight: `${noteHeight}px`}}>
                             {name}
                         </div>
                     ))}
@@ -178,15 +207,33 @@ const App: React.FC = () => {
                 <Timeline
                   notes={notes}
                   onAddNote={handleAddNote}
+                  onPreviewNote={handlePreviewNote}
                   onRemoveNote={handleRemoveNote}
                   playbackPosition={playbackPosition}
                   isPlaying={isPlaying}
                   duration={duration}
+                  noteHeight={noteHeight}
                 />
-            </div>
+              </>
+            )}
         </div>
-        <EffectsPanel effects={effects} setEffects={setEffects} />
       </main>
+
+      {/* Effects Panel Area */}
+      {isEffectsPanelOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 z-20" 
+          onClick={() => setIsEffectsPanelOpen(false)}
+          aria-hidden="true"
+        ></div>
+      )}
+      <div 
+        className={`fixed top-0 right-0 h-full w-full max-w-sm md:max-w-md lg:max-w-lg bg-gray-800 shadow-2xl z-30 transition-transform duration-300 ease-in-out transform ${
+            isEffectsPanelOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        <EffectsPanel effects={effects} setEffects={setEffects} onClose={() => setIsEffectsPanelOpen(false)} />
+      </div>
     </div>
   );
 };

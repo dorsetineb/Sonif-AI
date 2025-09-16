@@ -1,22 +1,24 @@
 import React, { useRef } from 'react';
 import type { Note } from '../types';
-import { PITCHES, NOTE_HEIGHT, TIMELINE_HEIGHT, GRID_COLUMNS_PER_SECOND, NOTE_FIXED_DURATION } from '../constants';
+import { PITCHES, GRID_COLUMNS_PER_SECOND, NOTE_FIXED_DURATION } from '../constants';
 
 interface TimelineProps {
   notes: Note[];
   onAddNote: (note: Omit<Note, 'id'>) => void;
   onRemoveNote: (noteId: string) => void;
+  onPreviewNote: (pitch: number) => void;
   playbackPosition: number; // 0 to 1
   isPlaying: boolean;
   duration: number; // in seconds
+  noteHeight: number;
 }
 
-export const Timeline: React.FC<TimelineProps> = ({ notes, onAddNote, onRemoveNote, playbackPosition, isPlaying, duration }) => {
+export const Timeline: React.FC<TimelineProps> = ({ notes, onAddNote, onRemoveNote, onPreviewNote, playbackPosition, isPlaying, duration, noteHeight }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const gridColumns = duration * GRID_COLUMNS_PER_SECOND;
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!timelineRef.current) return;
+    if (!timelineRef.current || noteHeight <= 0) return;
 
     const rect = timelineRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -25,10 +27,11 @@ export const Timeline: React.FC<TimelineProps> = ({ notes, onAddNote, onRemoveNo
     const colIndex = Math.floor(x / (rect.width / gridColumns));
     const time = colIndex * NOTE_FIXED_DURATION;
     
-    const pitchIndex = Math.floor(y / NOTE_HEIGHT);
+    const pitchIndex = Math.floor(y / noteHeight);
     const pitch = PITCHES[pitchIndex];
 
     if (pitch && time < duration) {
+      onPreviewNote(pitch);
       onAddNote({ time, pitch, duration: NOTE_FIXED_DURATION, waveform: 'sine' }); // App will override waveform
     }
   };
@@ -56,14 +59,13 @@ export const Timeline: React.FC<TimelineProps> = ({ notes, onAddNote, onRemoveNo
   };
 
   return (
-    <div className="relative bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden select-none w-full"
-      style={{ height: TIMELINE_HEIGHT }}
+    <div className="relative bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden select-none w-full h-full"
       ref={timelineRef}
       onClick={handleClick}
     >
       {/* Grid Lines */}
       {PITCHES.map((_, index) => (
-        <div key={`row-${index}`} className="absolute w-full border-t border-gray-700/50" style={{ top: (index + 1) * NOTE_HEIGHT, left: 0 }} />
+        <div key={`row-${index}`} className="absolute w-full border-t border-gray-700/50" style={{ top: (index + 1) * noteHeight, left: 0 }} />
       ))}
       {Array.from({ length: gridColumns - 1 }).map((_, index) => (
         <div 
@@ -82,7 +84,7 @@ export const Timeline: React.FC<TimelineProps> = ({ notes, onAddNote, onRemoveNo
         const left = (note.time / duration) * 100;
         const width = (note.duration / duration) * 100;
         const pitchIndex = PITCHES.findIndex(p => p === note.pitch);
-        const top = pitchIndex * NOTE_HEIGHT;
+        const top = pitchIndex * noteHeight;
         
         const noteStartTime = note.time / duration;
         const noteEndTime = (note.time + note.duration) / duration;
@@ -93,7 +95,7 @@ export const Timeline: React.FC<TimelineProps> = ({ notes, onAddNote, onRemoveNo
           left: `${left}%`,
           top: `${top}px`,
           width: `${width}%`,
-          height: `${NOTE_HEIGHT}px`,
+          height: `${noteHeight}px`,
           '--glow-color': getGlowColor(note.waveform),
         } as React.CSSProperties;
 
@@ -103,7 +105,7 @@ export const Timeline: React.FC<TimelineProps> = ({ notes, onAddNote, onRemoveNo
             onClick={(e) => { e.stopPropagation(); onRemoveNote(note.id); }}
             className={`note absolute cursor-pointer ${noteColor(note.waveform)} border-r border-gray-900/50 ${isActive ? 'note-active' : ''}`}
             style={style}
-            title={`Time: ${note.time.toFixed(2)}s, Pitch: ${note.pitch.toFixed(0)}Hz`}
+            title={`Tempo: ${note.time.toFixed(2)}s, Tom: ${note.pitch.toFixed(0)}Hz`}
           />
         );
       })}

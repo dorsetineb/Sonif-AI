@@ -395,6 +395,50 @@ class AudioEngine {
       this.activeSources = [];
   }
 
+  public playPreviewNote(noteInfo: { pitch: number; waveform: Note['waveform']; duration?: number }, effects: EffectsState): void {
+    if (!this.audioContext) {
+      this.initAudioContext().then(() => {
+        if (this.audioContext?.state === 'running') this.playPreviewNote(noteInfo, effects);
+      });
+      return;
+    }
+    if (this.audioContext.state !== 'running') {
+      this.audioContext.resume().then(() => this.playPreviewNote(noteInfo, effects));
+      return;
+    }
+
+    this.updateEffects(effects);
+
+    const now = this.audioContext.currentTime;
+    const duration = noteInfo.duration || 0.2;
+
+    const gainNode = this.audioContext.createGain();
+    gainNode.connect(this.masterIn);
+
+    const partialNote: Note = {
+      pitch: noteInfo.pitch,
+      waveform: noteInfo.waveform,
+      id: '',
+      time: 0,
+      duration: 0,
+    };
+    const source = this._createSoundSource(partialNote, now, this.audioContext);
+
+    source.connect(gainNode);
+
+    const attackTime = 0.005;
+    const releaseTime = duration * 0.7;
+    const peakVolume = 0.2;
+
+    gainNode.gain.setValueAtTime(0, now);
+    gainNode.gain.linearRampToValueAtTime(peakVolume, now + attackTime);
+    gainNode.gain.setValueAtTime(peakVolume, now + duration - releaseTime);
+    gainNode.gain.linearRampToValueAtTime(0, now + duration);
+
+    source.start(now);
+    source.stop(now + duration);
+  }
+
   public async exportToWav(notes: Note[], duration: number, effects: EffectsState): Promise<void> {
       if (!this.audioContext) {
         // Create a temporary context for export if the main one doesn't exist.

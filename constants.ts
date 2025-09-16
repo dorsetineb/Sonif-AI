@@ -26,9 +26,9 @@ export const GRID_COLUMNS_PER_SECOND = 8;
 export const NOTE_FIXED_DURATION = 1 / GRID_COLUMNS_PER_SECOND;
 
 export const WAVEFORM_CONFIG: { [key in Waveform]: { name: string } } = {
-  sine: { name: 'Pure Tone' },
-  square: { name: 'Retro' },
-  sawtooth: { name: 'Synth Lead' },
-  triangle: { name: 'Soft Flute' },
-  pulse: { name: 'Pulse' },
+  sine: { name: 'Tom Puro' },
+  square: { name: 'Retrô' },
+  sawtooth: { name: 'Sintetizador' },
+  triangle: { name: 'Flauta Suave' },
+  pulse: { name: 'Pulso' },
 };
