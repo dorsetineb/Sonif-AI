@@ -44,74 +44,82 @@ export const Timeline: React.FC<TimelineProps> = ({
   };
 
   return (
-    <div className="relative bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden select-none w-full h-full"
-      ref={timelineRef}
-      onClick={handleClick}
-    >
-      {/* Grid Lines */}
-      {rowLabels.map((_, index) => (
-        <div key={`row-${index}`} className="absolute w-full border-t border-gray-700/50" style={{ top: (index + 1) * noteHeight, left: 0 }} />
-      ))}
-      {Array.from({ length: gridColumns - 1 }).map((_, index) => (
-        <div 
-          key={`col-${index}`} 
-          className="absolute h-full border-l border-gray-700/50" 
-          style={{ 
-            left: `${((index + 1) / gridColumns) * 100}%`,
-            top: 0, 
-            opacity: (index + 1) % GRID_COLUMNS_PER_SECOND === 0 ? 0.8 : 0.4 
-          }} 
-        />
-      ))}
-      <div className='absolute left-0 top-0 w-full h-full flex flex-col'>
+    <div className="flex flex-row w-full h-full bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden select-none">
+      {/* Labels Column */}
+      <div className="w-14 flex-shrink-0 border-r border-gray-700/80 bg-gray-800/30">
         {rowLabels.map((name, index) => (
-            <div key={index} className="text-gray-400 text-xs font-mono select-none flex items-center pl-2" style={{height: noteHeight, lineHeight: `${noteHeight}px`}}>
+            <div 
+              key={index} 
+              className="text-gray-400 text-xs font-mono select-none flex items-center justify-center" 
+              style={{height: noteHeight, lineHeight: `${noteHeight}px`}}
+            >
                 {name}
             </div>
         ))}
       </div>
-
-
-      {/* Notes */}
-      {notes.map(note => {
-        const left = (note.time / duration) * 100;
-        const width = (note.duration / duration) * 100;
-
-        const noteValue = isMelodicNote(note) ? note.pitch : note.sample;
-        const rowIndex = rows.findIndex(r => r === noteValue);
-        if (rowIndex === -1) return null;
-
-        const top = rowIndex * noteHeight;
-        
-        const noteStartTime = note.time / duration;
-        const noteEndTime = (note.time + note.duration) / duration;
-        const isActive = isPlaying && playbackPosition >= noteStartTime && playbackPosition < noteEndTime;
-        
-        const { className, glowColor } = getNoteStyle(note);
-        const style = {
-          left: `${left}%`,
-          top: `${top}px`,
-          width: `${width}%`,
-          height: `${noteHeight}px`,
-          '--glow-color': glowColor,
-        } as React.CSSProperties;
-
-        return (
-          <div
-            key={note.id}
-            onClick={(e) => { e.stopPropagation(); onRemoveNote(note.id); }}
-            className={`note absolute cursor-pointer ${className} border-r border-gray-900/50 ${isActive ? 'note-active' : ''}`}
-            style={style}
-          />
-        );
-      })}
       
-      {/* Playback Cursor */}
-      {isPlaying && (
-         <div className="absolute top-0 w-0.5 bg-red-500/80 h-full z-10"
-            style={{ left: `${playbackPosition * 100}%` }}
-         />
-      )}
+      {/* Grid Area */}
+      <div className="relative flex-grow min-w-0"
+        ref={timelineRef}
+        onClick={handleClick}
+      >
+        {/* Grid Lines */}
+        {rowLabels.map((_, index) => (
+          <div key={`row-${index}`} className="absolute w-full border-t border-gray-700/50" style={{ top: (index + 1) * noteHeight, left: 0 }} />
+        ))}
+        {Array.from({ length: gridColumns - 1 }).map((_, index) => (
+          <div 
+            key={`col-${index}`} 
+            className="absolute h-full border-l border-gray-700/50" 
+            style={{ 
+              left: `${((index + 1) / gridColumns) * 100}%`,
+              top: 0, 
+              opacity: (index + 1) % GRID_COLUMNS_PER_SECOND === 0 ? 0.8 : 0.4 
+            }} 
+          />
+        ))}
+
+        {/* Notes */}
+        {notes.map(note => {
+          const left = (note.time / duration) * 100;
+          const width = (note.duration / duration) * 100;
+
+          const noteValue = isMelodicNote(note) ? note.pitch : note.sample;
+          const rowIndex = rows.findIndex(r => r === noteValue);
+          if (rowIndex === -1) return null;
+
+          const top = rowIndex * noteHeight;
+          
+          const noteStartTime = note.time / duration;
+          const noteEndTime = (note.time + note.duration) / duration;
+          const isActive = isPlaying && playbackPosition >= noteStartTime && playbackPosition < noteEndTime;
+          
+          const { className, glowColor } = getNoteStyle(note);
+          const style = {
+            left: `${left}%`,
+            top: `${top}px`,
+            width: `${width}%`,
+            height: `${noteHeight}px`,
+            '--glow-color': glowColor,
+          } as React.CSSProperties;
+
+          return (
+            <div
+              key={note.id}
+              onClick={(e) => { e.stopPropagation(); onRemoveNote(note.id); }}
+              className={`note absolute cursor-pointer ${className} border-r border-gray-900/50 ${isActive ? 'note-active' : ''}`}
+              style={style}
+            />
+          );
+        })}
+        
+        {/* Playback Cursor */}
+        {isPlaying && (
+           <div className="absolute top-0 w-0.5 bg-red-500/80 h-full z-10"
+              style={{ left: `${playbackPosition * 100}%` }}
+           />
+        )}
+      </div>
     </div>
   );
 };

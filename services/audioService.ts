@@ -1,4 +1,4 @@
-import { Note, EffectsState, Composition, DrumNote, DrumSample } from '../types';
+import { Note, EffectsState, Composition, DrumNote, DrumSample, BassEffectsState, DrumEffectsState } from '../types';
 
 class AudioEngine {
   private audioContext: AudioContext | null = null;
@@ -6,11 +6,18 @@ class AudioEngine {
   
   // Master I/O
   private masterIn: GainNode | null = null; // Melody input (goes to effects)
-  private bassIn: GainNode | null = null; // Bass input (bypasses effects)
-  private drumIn: GainNode | null = null; // Drum input (bypasses effects)
+  private bassIn: GainNode | null = null; // Bass input
+  private drumIn: GainNode | null = null; // Drum input
   private masterOut: GainNode | null = null; // Final output gain
   
-  // Effect Nodes & Controls
+  // Track Volume & Timbre
+  private melodyVolumeNode: GainNode | null = null;
+  private bassVolumeNode: GainNode | null = null;
+  private drumVolumeNode: GainNode | null = null;
+  private bassFilter: BiquadFilterNode | null = null; // For bass "weight"
+  private drumTone = 0.5; // For drum "tone"
+
+  // Melody Effect Nodes
   private distortionInput: GainNode | null = null;
   private distortionWet: GainNode | null = null;
   private distortionDry: GainNode | null = null;
@@ -74,7 +81,46 @@ class AudioEngine {
   private reverbConvolver: ConvolverNode | null = null;
   private reverbOutput: GainNode | null = null;
   
+  // Bass Effect Nodes
+  private bassDistortionInput: GainNode | null = null;
+  private bassDistortionWet: GainNode | null = null;
+  private bassDistortionDry: GainNode | null = null;
+  private bassDistortionShaper: WaveShaperNode | null = null;
+  private bassDistortionOutput: GainNode | null = null;
+  private bassReverbInput: GainNode | null = null;
+  private bassReverbWet: GainNode | null = null;
+  private bassReverbDry: GainNode | null = null;
+  private bassReverbConvolver: ConvolverNode | null = null;
+  private bassReverbOutput: GainNode | null = null;
+  private bassChorusInput: GainNode | null = null;
+  // FIX: Added dedicated nodes for the bass chorus effect to allow proper control.
+  private bassChorusWet: GainNode | null = null;
+  private bassChorusDry: GainNode | null = null;
+  private bassChorusDelay: DelayNode | null = null;
+  private bassChorusLfo: OscillatorNode | null = null;
+  private bassChorusDepth: GainNode | null = null;
+  private bassChorusBaseDelay: ConstantSourceNode | null = null;
+  private bassChorusOutput: GainNode | null = null;
+  private bassCompressor: DynamicsCompressorNode | null = null;
+
+  // Drum Effect Nodes
+  private drumDelayInput: GainNode | null = null;
+  private drumDelayWet: GainNode | null = null;
+  private drumDelayDry: GainNode | null = null;
+  private drumDelayNode: DelayNode | null = null;
+  private drumDelayFeedback: GainNode | null = null;
+  private drumDelayOutput: GainNode | null = null;
+  private drumReverbInput: GainNode | null = null;
+  private drumReverbWet: GainNode | null = null;
+  private drumReverbDry: GainNode | null = null;
+  private drumReverbConvolver: ConvolverNode | null = null;
+  private drumReverbOutput: GainNode | null = null;
+  private drumCompressor: DynamicsCompressorNode | null = null;
+  private drumFilter: BiquadFilterNode | null = null;
+
+  // Custom Waves
   private pulseWave: PeriodicWave | null = null;
+  private organWave: PeriodicWave | null = null;
 
   public async initAudioContext(): Promise<void> {
     if (this.audioContext && this.audioContext.state === 'running') {
@@ -95,7 +141,21 @@ class AudioEngine {
     this.drumIn = ac.createGain();
     this.masterOut = ac.createGain();
 
-    let currentNode: AudioNode = this.masterIn;
+    // Create volume controls
+    this.melodyVolumeNode = ac.createGain();
+    this.bassVolumeNode = ac.createGain();
+    this.drumVolumeNode = ac.createGain();
+
+    // Connect melody volume to master input
+    this.melodyVolumeNode.connect(this.masterIn);
+
+    // Create timbre controls
+    this.bassFilter = ac.createBiquadFilter();
+    this.bassFilter.type = 'lowpass';
+    this.bassFilter.frequency.value = 1500; // Default to a bright sound
+    this.bassFilter.Q.value = 1;
+
+    let melodyFxChain: AudioNode = this.masterIn;
 
     // --- Create a FIXED, SEQUENTIAL effects chain for MELODY track ---
     
@@ -108,8 +168,8 @@ class AudioEngine {
     this.distortionOutput = ac.createGain();
     this.distortionInput.connect(this.distortionDry).connect(this.distortionOutput);
     this.distortionInput.connect(this.distortionWet).connect(this.distortionShaper).connect(this.toneFilter).connect(this.distortionOutput);
-    currentNode.connect(this.distortionInput);
-    currentNode = this.distortionOutput;
+    melodyFxChain.connect(this.distortionInput);
+    melodyFxChain = this.distortionOutput;
 
     // 2. Panner
     this.pannerInput = ac.createGain();
@@ -119,8 +179,8 @@ class AudioEngine {
     this.pannerOutput = ac.createGain();
     this.pannerInput.connect(this.pannerDry).connect(this.pannerOutput);
     this.pannerInput.connect(this.pannerWet).connect(this.pannerNode).connect(this.pannerOutput);
-    currentNode.connect(this.pannerInput);
-    currentNode = this.pannerOutput;
+    melodyFxChain.connect(this.pannerInput);
+    melodyFxChain = this.pannerOutput;
 
     // 3. Phaser
     this.phaserInput = ac.createGain();
@@ -144,8 +204,8 @@ class AudioEngine {
     this.phaserFilters[3].connect(this.phaserFeedback).connect(this.phaserFilters[0]);
     this.phaserLfo.start();
     this.phaserBaseFreq.start();
-    currentNode.connect(this.phaserInput);
-    currentNode = this.phaserOutput;
+    melodyFxChain.connect(this.phaserInput);
+    melodyFxChain = this.phaserOutput;
 
     // 4. Flanger
     this.flangerInput = ac.createGain();
@@ -164,8 +224,8 @@ class AudioEngine {
     this.flangerDelay.connect(this.flangerFeedback).connect(this.flangerDelay);
     this.flangerLfo.start();
     this.flangerBaseDelay.start();
-    currentNode.connect(this.flangerInput);
-    currentNode = this.flangerOutput;
+    melodyFxChain.connect(this.flangerInput);
+    melodyFxChain = this.flangerOutput;
 
     // 5. Chorus
     this.chorusInput = ac.createGain();
@@ -182,8 +242,8 @@ class AudioEngine {
     this.chorusInput.connect(this.chorusWet).connect(this.chorusDelay).connect(this.chorusOutput);
     this.chorusLfo.start();
     this.chorusBaseDelay.start();
-    currentNode.connect(this.chorusInput);
-    currentNode = this.chorusOutput;
+    melodyFxChain.connect(this.chorusInput);
+    melodyFxChain = this.chorusOutput;
 
     // 6. Tremolo
     this.tremoloInput = ac.createGain();
@@ -201,8 +261,8 @@ class AudioEngine {
     this.tremoloInput.connect(this.tremoloWet).connect(tremoloGain).connect(this.tremoloOutput);
     this.tremoloLfo.start();
     this.tremoloBaseGain.start();
-    currentNode.connect(this.tremoloInput);
-    currentNode = this.tremoloOutput;
+    melodyFxChain.connect(this.tremoloInput);
+    melodyFxChain = this.tremoloOutput;
     
     // 7. Delay
     this.delayInput = ac.createGain();
@@ -215,8 +275,8 @@ class AudioEngine {
     this.delayInput.connect(this.delayWet).connect(this.delayNode);
     this.delayNode.connect(this.delayFeedback).connect(this.delayNode);
     this.delayNode.connect(this.delayOutput);
-    currentNode.connect(this.delayInput);
-    currentNode = this.delayOutput;
+    melodyFxChain.connect(this.delayInput);
+    melodyFxChain = this.delayOutput;
     
     // 8. Reverb
     this.reverbInput = ac.createGain();
@@ -226,13 +286,103 @@ class AudioEngine {
     this.reverbConvolver = ac.createConvolver();
     this.reverbInput.connect(this.reverbDry).connect(this.reverbOutput);
     this.reverbInput.connect(this.reverbWet).connect(this.reverbConvolver).connect(this.reverbOutput);
-    currentNode.connect(this.reverbInput);
-    currentNode = this.reverbOutput;
+    melodyFxChain.connect(this.reverbInput);
+    melodyFxChain = this.reverbOutput;
+    
+    // --- Create effects chain for BASS track ---
+    // Order: Distortion -> Chorus -> Compressor -> Reverb
+    let bassFxChain: AudioNode = this.bassIn.connect(this.bassFilter).connect(this.bassVolumeNode);
+    
+    // Bass Distortion
+    this.bassDistortionInput = ac.createGain();
+    this.bassDistortionWet = ac.createGain();
+    this.bassDistortionDry = ac.createGain();
+    this.bassDistortionShaper = ac.createWaveShaper();
+    this.bassDistortionOutput = ac.createGain();
+    this.bassDistortionInput.connect(this.bassDistortionDry).connect(this.bassDistortionOutput);
+    this.bassDistortionInput.connect(this.bassDistortionWet).connect(this.bassDistortionShaper).connect(this.bassDistortionOutput);
+    bassFxChain.connect(this.bassDistortionInput);
+    bassFxChain = this.bassDistortionOutput;
+
+    // Bass Chorus (Re-using melody chorus logic as a template)
+    // FIX: Correctly set up the bass chorus audio graph.
+    this.bassChorusInput = ac.createGain();
+    this.bassChorusWet = ac.createGain();
+    this.bassChorusDry = ac.createGain();
+    this.bassChorusOutput = ac.createGain();
+    this.bassChorusDelay = ac.createDelay(1.0);
+    this.bassChorusLfo = ac.createOscillator();
+    this.bassChorusDepth = ac.createGain();
+    this.bassChorusBaseDelay = ac.createConstantSource();
+    this.bassChorusBaseDelay.connect(this.bassChorusDelay.delayTime);
+    this.bassChorusLfo.connect(this.bassChorusDepth).connect(this.bassChorusDelay.delayTime);
+    this.bassChorusInput.connect(this.bassChorusDry).connect(this.bassChorusOutput);
+    this.bassChorusInput.connect(this.bassChorusWet).connect(this.bassChorusDelay).connect(this.bassChorusOutput);
+    this.bassChorusLfo.start();
+    this.bassChorusBaseDelay.start();
+    bassFxChain.connect(this.bassChorusInput);
+    bassFxChain = this.bassChorusOutput;
+
+    // Bass Compressor
+    this.bassCompressor = ac.createDynamicsCompressor();
+    bassFxChain.connect(this.bassCompressor);
+    bassFxChain = this.bassCompressor;
+
+    // Bass Reverb
+    this.bassReverbInput = ac.createGain();
+    this.bassReverbWet = ac.createGain();
+    this.bassReverbDry = ac.createGain();
+    this.bassReverbOutput = ac.createGain();
+    this.bassReverbConvolver = ac.createConvolver();
+    this.bassReverbInput.connect(this.bassReverbDry).connect(this.bassReverbOutput);
+    this.bassReverbInput.connect(this.bassReverbWet).connect(this.bassReverbConvolver).connect(this.bassReverbOutput);
+    bassFxChain.connect(this.bassReverbInput);
+    bassFxChain = this.bassReverbOutput;
+    
+    // --- Create effects chain for DRUM track ---
+    // Order: Filter -> Compressor -> Delay -> Reverb
+    let drumFxChain: AudioNode = this.drumIn.connect(this.drumVolumeNode);
+
+    // Drum Filter
+    this.drumFilter = ac.createBiquadFilter();
+    this.drumFilter.type = 'lowpass';
+    drumFxChain.connect(this.drumFilter);
+    drumFxChain = this.drumFilter;
+    
+    // Drum Compressor
+    this.drumCompressor = ac.createDynamicsCompressor();
+    drumFxChain.connect(this.drumCompressor);
+    drumFxChain = this.drumCompressor;
+
+    // Drum Delay
+    this.drumDelayInput = ac.createGain();
+    this.drumDelayWet = ac.createGain();
+    this.drumDelayDry = ac.createGain();
+    this.drumDelayOutput = ac.createGain();
+    this.drumDelayNode = ac.createDelay(5.0);
+    this.drumDelayFeedback = ac.createGain();
+    this.drumDelayInput.connect(this.drumDelayDry).connect(this.drumDelayOutput);
+    this.drumDelayInput.connect(this.drumDelayWet).connect(this.drumDelayNode);
+    this.drumDelayNode.connect(this.drumDelayFeedback).connect(this.drumDelayNode);
+    this.drumDelayNode.connect(this.drumDelayOutput);
+    drumFxChain.connect(this.drumDelayInput);
+    drumFxChain = this.drumDelayOutput;
+
+    // Drum Reverb
+    this.drumReverbInput = ac.createGain();
+    this.drumReverbWet = ac.createGain();
+    this.drumReverbDry = ac.createGain();
+    this.drumReverbOutput = ac.createGain();
+    this.drumReverbConvolver = ac.createConvolver();
+    this.drumReverbInput.connect(this.drumReverbDry).connect(this.drumReverbOutput);
+    this.drumReverbInput.connect(this.drumReverbWet).connect(this.drumReverbConvolver).connect(this.drumReverbOutput);
+    drumFxChain.connect(this.drumReverbInput);
+    drumFxChain = this.drumReverbOutput;
     
     // --- Connect all tracks to master out ---
-    currentNode.connect(this.masterOut); // Effects chain output
-    this.bassIn.connect(this.masterOut);
-    this.drumIn.connect(this.masterOut);
+    melodyFxChain.connect(this.masterOut); // Melody effects chain output
+    bassFxChain.connect(this.masterOut); // Bass effects chain output
+    drumFxChain.connect(this.masterOut); // Drum effects chain output
     this.masterOut.connect(ac.destination);
 
     this._createCustomWaves();
@@ -328,12 +478,118 @@ class AudioEngine {
     }
   }
 
+  public updateBassEffects(effects: BassEffectsState): void {
+      // FIX: Check for all required bass chorus nodes and remove usage of non-existent `getDestination` method.
+      if (!this.audioContext || !this.bassDistortionWet || !this.bassCompressor || !this.bassChorusInput || !this.bassChorusWet || !this.bassChorusDry || !this.bassChorusLfo || !this.bassChorusDepth || !this.bassChorusBaseDelay) return;
+      const { currentTime } = this.audioContext;
+      
+      // Bass Distortion
+      this.bassDistortionWet.gain.setValueAtTime(effects.distortion.active ? 1 : 0, currentTime);
+      this.bassDistortionDry.gain.setValueAtTime(effects.distortion.active ? 0 : 1, currentTime);
+      if(effects.distortion.active){
+        this.bassDistortionShaper.curve = this._createDistortionCurve(effects.distortion.drive * 0.5); // Bass distortion is usually more subtle
+      }
+      
+      // Bass Chorus
+      this.bassChorusWet.gain.setValueAtTime(effects.chorus.active ? 0.5 : 0, currentTime); // Mix chorus at 50%
+      this.bassChorusDry.gain.setValueAtTime(effects.chorus.active ? 0.5 : 1, currentTime);
+      if (effects.chorus.active) {
+        this.bassChorusLfo.frequency.setValueAtTime(effects.chorus.rate, currentTime);
+        this.bassChorusDepth.gain.setValueAtTime(effects.chorus.depth / 1000, currentTime);
+        this.bassChorusBaseDelay.offset.setValueAtTime(effects.chorus.delay / 1000, currentTime);
+      }
+
+      // Bass Compressor
+      const comp = this.bassCompressor;
+      comp.threshold.setValueAtTime(effects.compressor.active ? effects.compressor.threshold : 0, currentTime);
+      comp.ratio.setValueAtTime(effects.compressor.active ? effects.compressor.ratio : 1, currentTime);
+      comp.attack.setValueAtTime(effects.compressor.active ? effects.compressor.attack : 0.003, currentTime);
+      comp.release.setValueAtTime(effects.compressor.active ? effects.compressor.release : 0.25, currentTime);
+
+      // Bass Reverb
+      this.bassReverbWet.gain.setValueAtTime(effects.reverb.active ? effects.reverb.wet : 0, currentTime);
+      this.bassReverbDry.gain.setValueAtTime(effects.reverb.active ? (1.0 - effects.reverb.wet) : 1, currentTime);
+      if(effects.reverb.active) {
+          this.bassReverbConvolver.buffer = this._createReverbImpulseResponse(effects.reverb.decay);
+      }
+  }
+  
+  public updateDrumEffects(effects: DrumEffectsState): void {
+      if (!this.audioContext || !this.drumDelayWet || !this.drumCompressor || !this.drumFilter) return;
+      const { currentTime } = this.audioContext;
+
+      // Drum Filter
+      this.drumFilter.frequency.setValueAtTime(effects.filter.active ? effects.filter.frequency : 22050, currentTime);
+      this.drumFilter.Q.setValueAtTime(effects.filter.active ? effects.filter.q : 1, currentTime);
+
+      // Drum Compressor
+      const comp = this.drumCompressor;
+      comp.threshold.setValueAtTime(effects.compressor.active ? effects.compressor.threshold : 0, currentTime);
+      comp.ratio.setValueAtTime(effects.compressor.active ? effects.compressor.ratio : 1, currentTime);
+      comp.attack.setValueAtTime(effects.compressor.active ? effects.compressor.attack : 0.003, currentTime);
+      comp.release.setValueAtTime(effects.compressor.active ? effects.compressor.release : 0.25, currentTime);
+
+      // Drum Delay
+      this.drumDelayWet.gain.setValueAtTime(effects.delay.active ? 1 : 0, currentTime);
+      this.drumDelayDry.gain.setValueAtTime(effects.delay.active ? 0 : 1, currentTime);
+      if(effects.delay.active){
+        this.drumDelayNode.delayTime.setValueAtTime(effects.delay.time, currentTime);
+        this.drumDelayFeedback.gain.setValueAtTime(effects.delay.feedback, currentTime);
+      }
+
+      // Drum Reverb
+      this.drumReverbWet.gain.setValueAtTime(effects.reverb.active ? effects.reverb.wet : 0, currentTime);
+      this.drumReverbDry.gain.setValueAtTime(effects.reverb.active ? (1.0 - effects.reverb.wet) : 1, currentTime);
+      if(effects.reverb.active) {
+          this.drumReverbConvolver.buffer = this._createReverbImpulseResponse(effects.reverb.decay);
+      }
+  }
+
+  public setMelodyVolume(level: number): void {
+    if (this.melodyVolumeNode && this.audioContext) {
+      this.melodyVolumeNode.gain.setTargetAtTime(level, this.audioContext.currentTime, 0.01);
+    }
+  }
+  
+  public setBassVolume(level: number): void {
+    if (this.bassVolumeNode && this.audioContext) {
+      this.bassVolumeNode.gain.setTargetAtTime(level, this.audioContext.currentTime, 0.01);
+    }
+  }
+
+  public setDrumVolume(level: number): void {
+    if (this.drumVolumeNode && this.audioContext) {
+      this.drumVolumeNode.gain.setTargetAtTime(level, this.audioContext.currentTime, 0.01);
+    }
+  }
+  
+  public setBassWeight(weight: number): void { // weight 0-1
+    if (this.bassFilter && this.audioContext) {
+      // More weight = lower cutoff frequency for a heavier, bassier sound
+      const minFreq = 80;
+      const maxFreq = 1500;
+      // Exponential scale: as weight -> 1, freq -> minFreq
+      const freq = minFreq * Math.pow(maxFreq / minFreq, 1 - weight);
+      this.bassFilter.frequency.setTargetAtTime(freq, this.audioContext.currentTime, 0.01);
+    }
+  }
+
+  public setDrumTone(tone: number): void { // tone 0-1
+      this.drumTone = tone;
+  }
+
   private _createSoundSource(note: Note, timeOffset: number, context: BaseAudioContext): OscillatorNode {
     if (note.waveform === 'pulse' && this.pulseWave) {
       const pulseOsc = context.createOscillator();
       pulseOsc.setPeriodicWave(this.pulseWave);
       pulseOsc.frequency.setValueAtTime(note.pitch, timeOffset);
       return pulseOsc;
+    }
+    if (note.waveform === 'organ' && this.organWave) {
+      const organOsc = context.createOscillator();
+      organOsc.setPeriodicWave(this.organWave);
+      organOsc.frequency.setValueAtTime(note.pitch, timeOffset);
+      return organOsc;
     }
     const osc = context.createOscillator();
     osc.type = note.waveform as OscillatorType;
@@ -369,13 +625,15 @@ class AudioEngine {
     return mergedNotes;
   }
 
-  public playComposition(composition: Composition, effects: EffectsState): void {
+  public playComposition(composition: Composition, effects: EffectsState, bassEffects: BassEffectsState, drumEffects: DrumEffectsState): void {
     if (!this.audioContext || this.audioContext.state !== 'running' || !this.bassIn || !this.drumIn) {
       console.error("AudioContext not running. Call initAudioContext from a user gesture first.");
       return;
     }
 
     this.updateEffects(effects); 
+    this.updateBassEffects(bassEffects);
+    this.updateDrumEffects(drumEffects);
     
     this.stopAll();
     const now = this.audioContext.currentTime;
@@ -384,7 +642,7 @@ class AudioEngine {
     const melodyNotes = this.mergeConsecutiveNotes(composition.melody);
     melodyNotes.forEach(note => {
       const gainNode = this.audioContext.createGain();
-      gainNode.connect(this.masterIn);
+      gainNode.connect(this.melodyVolumeNode);
       const source = this._createSoundSource(note, now + note.time, this.audioContext);
       source.connect(gainNode);
       const attackTime = 0.005, releaseTime = 0.01, peakVolume = 0.25;
@@ -431,14 +689,10 @@ class AudioEngine {
   }
 
   public playPreviewNote(noteInfo: { pitch: number; waveform: Note['waveform']; duration?: number }, effects: EffectsState): void {
-    if (!this.audioContext) {
+    if (!this.audioContext || this.audioContext.state !== 'running') {
       this.initAudioContext().then(() => {
         if (this.audioContext?.state === 'running') this.playPreviewNote(noteInfo, effects);
       });
-      return;
-    }
-    if (this.audioContext.state !== 'running') {
-      this.audioContext.resume().then(() => this.playPreviewNote(noteInfo, effects));
       return;
     }
 
@@ -448,7 +702,7 @@ class AudioEngine {
     const duration = noteInfo.duration || 0.2;
 
     const gainNode = this.audioContext.createGain();
-    gainNode.connect(this.masterIn);
+    gainNode.connect(this.melodyVolumeNode);
 
     const partialNote: Note = {
       pitch: noteInfo.pitch,
@@ -475,7 +729,14 @@ class AudioEngine {
   }
 
   public playPreviewBassNote(pitch: number): void {
-      if (!this.audioContext || !this.bassIn) return;
+      if (!this.audioContext || this.audioContext.state !== 'running') {
+        this.initAudioContext().then(() => {
+          if (this.audioContext?.state === 'running') this.playPreviewBassNote(pitch);
+        });
+        return;
+      }
+
+      if (!this.bassIn) return;
       const now = this.audioContext.currentTime;
       const gainNode = this.audioContext.createGain();
       gainNode.connect(this.bassIn);
@@ -491,11 +752,23 @@ class AudioEngine {
   }
 
   public playPreviewDrumSample(sample: DrumSample): void {
-      if (!this.audioContext) return;
+      if (!this.audioContext || this.audioContext.state !== 'running') {
+        this.initAudioContext().then(() => {
+          if (this.audioContext?.state === 'running') this.playPreviewDrumSample(sample);
+        });
+        return;
+      }
       this._playDrumSample(sample, this.audioContext.currentTime);
   }
 
-  public async exportToWav(composition: Composition, duration: number, effects: EffectsState): Promise<void> {
+  public async exportToWav(
+    composition: Composition, 
+    duration: number, 
+    effects: EffectsState, 
+    bassEffects: BassEffectsState, 
+    drumEffects: DrumEffectsState,
+    params: { melodyVolume: number; bassVolume: number; bassWeight: number; drumVolume: number; drumTone: number }
+  ): Promise<void> {
       if (!this.audioContext) {
         this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
@@ -506,8 +779,11 @@ class AudioEngine {
       masterOut.connect(offlineContext.destination);
 
       // --- Create Melody Track with Effects ---
+      const melodyVolumeNode = offlineContext.createGain();
+      melodyVolumeNode.gain.value = params.melodyVolume;
       const melodyIn = offlineContext.createGain();
-      let currentNode: AudioNode = melodyIn;
+      melodyVolumeNode.connect(melodyIn);
+      let melodyFxChain: AudioNode = melodyIn;
       
       const effectChain: { [K in keyof EffectsState]: (input: AudioNode, output: AudioNode, eff: EffectsState[K]) => void } = {
           distortion: (input, output, eff) => {
@@ -641,17 +917,20 @@ class AudioEngine {
       const effectOrder: (keyof EffectsState)[] = ['distortion', 'panner', 'phaser', 'flanger', 'chorus', 'tremolo', 'delay', 'reverb'];
       for (const key of effectOrder) {
           const nextNode = offlineContext.createGain();
-          (effectChain[key] as any)(currentNode, nextNode, effects[key]);
-          currentNode = nextNode;
+          (effectChain[key] as any)(melodyFxChain, nextNode, effects[key]);
+          melodyFxChain = nextNode;
       }
-      currentNode.connect(masterOut);
+      melodyFxChain.connect(masterOut);
       
       const pulseWave = this._createPulseWaveForContext(offlineContext);
+      const organWave = this._createOrganWaveForContext(offlineContext);
       this.mergeConsecutiveNotes(composition.melody).forEach(note => {
-        const gainNode = offlineContext.createGain(); gainNode.connect(melodyIn);
+        const gainNode = offlineContext.createGain(); gainNode.connect(melodyVolumeNode);
         let source: OscillatorNode;
         if(note.waveform === 'pulse' && pulseWave){
             source = offlineContext.createOscillator(); source.setPeriodicWave(pulseWave); source.frequency.value = note.pitch;
+        } else if (note.waveform === 'organ' && organWave) {
+            source = offlineContext.createOscillator(); source.setPeriodicWave(organWave); source.frequency.value = note.pitch;
         } else {
             source = offlineContext.createOscillator(); source.type = note.waveform as OscillatorType; source.frequency.value = note.pitch;
         }
@@ -664,7 +943,38 @@ class AudioEngine {
       });
 
       // --- Create Bass Track ---
-      const bassIn = offlineContext.createGain(); bassIn.connect(masterOut);
+      const bassVolumeNode = offlineContext.createGain(); 
+      bassVolumeNode.gain.value = params.bassVolume;
+      const bassWeightFilter = offlineContext.createBiquadFilter();
+      bassWeightFilter.type = 'lowpass';
+      bassWeightFilter.Q.value = 1;
+      const minFreq = 80; const maxFreq = 1500;
+      bassWeightFilter.frequency.value = minFreq * Math.pow(maxFreq / minFreq, 1 - params.bassWeight);
+      
+      let bassFxChain: AudioNode = offlineContext.createGain();
+      bassFxChain.connect(bassWeightFilter).connect(bassVolumeNode);
+      const bassIn = bassFxChain;
+
+      // Bass FX Chain: Distortion -> Chorus -> Compressor -> Reverb
+      const bassDistOut = offlineContext.createGain();
+      effectChain.distortion(bassVolumeNode, bassDistOut, { active: bassEffects.distortion.active, drive: bassEffects.distortion.drive * 0.5, tone: 5000, output: 1 });
+      
+      const bassChorusOut = offlineContext.createGain();
+      effectChain.chorus(bassDistOut, bassChorusOut, bassEffects.chorus);
+
+      const bassComp = offlineContext.createDynamicsCompressor();
+      if(bassEffects.compressor.active){
+          bassComp.threshold.value = bassEffects.compressor.threshold;
+          bassComp.ratio.value = bassEffects.compressor.ratio;
+          bassComp.attack.value = bassEffects.compressor.attack;
+          bassComp.release.value = bassEffects.compressor.release;
+      }
+      bassChorusOut.connect(bassComp);
+      
+      const bassReverbOut = offlineContext.createGain();
+      effectChain.reverb(bassComp, bassReverbOut, bassEffects.reverb);
+      bassReverbOut.connect(masterOut);
+
       this.mergeConsecutiveNotes(composition.bass).forEach(note => {
           const gainNode = offlineContext.createGain(); gainNode.connect(bassIn);
           const osc = offlineContext.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = note.pitch;
@@ -677,9 +987,37 @@ class AudioEngine {
       });
 
       // --- Create Drum Track ---
-      const drumIn = offlineContext.createGain(); drumIn.connect(masterOut);
+      const drumVolumeNode = offlineContext.createGain(); 
+      drumVolumeNode.gain.value = params.drumVolume;
+      const drumIn = drumVolumeNode;
+
+      // Drum FX Chain: Filter -> Compressor -> Delay -> Reverb
+      const drumFilter = offlineContext.createBiquadFilter();
+      drumFilter.type = 'lowpass';
+      if(drumEffects.filter.active){
+          drumFilter.frequency.value = drumEffects.filter.frequency;
+          drumFilter.Q.value = drumEffects.filter.q;
+      }
+      drumVolumeNode.connect(drumFilter);
+
+      const drumComp = offlineContext.createDynamicsCompressor();
+      if(drumEffects.compressor.active){
+          drumComp.threshold.value = drumEffects.compressor.threshold;
+          drumComp.ratio.value = drumEffects.compressor.ratio;
+          drumComp.attack.value = drumEffects.compressor.attack;
+          drumComp.release.value = drumEffects.compressor.release;
+      }
+      drumFilter.connect(drumComp);
+      
+      const drumDelayOut = offlineContext.createGain();
+      effectChain.delay(drumComp, drumDelayOut, drumEffects.delay);
+      
+      const drumReverbOut = offlineContext.createGain();
+      effectChain.reverb(drumDelayOut, drumReverbOut, drumEffects.reverb);
+      drumReverbOut.connect(masterOut);
+
       composition.drums.forEach(note => {
-          this._playDrumSampleOffline(offlineContext, drumIn, note.sample, note.time);
+          this._playDrumSampleOffline(offlineContext, drumIn, note.sample, note.time, params.drumTone);
       });
 
       const renderedBuffer = await offlineContext.startRendering();
@@ -703,10 +1041,17 @@ class AudioEngine {
         const imag_pulse = new Float32Array(real_pulse.length).fill(0);
         return context.createPeriodicWave(real_pulse, imag_pulse);
     }
+    
+    private _createOrganWaveForContext(context: BaseAudioContext): PeriodicWave {
+      const real = new Float32Array([0, 0.8, 0.4, 0.2, 0.1, 0.05]);
+      const imag = new Float32Array(real.length).fill(0);
+      return context.createPeriodicWave(real, imag);
+    }
 
     private _createCustomWaves(): void {
         if (!this.audioContext) return;
         this.pulseWave = this._createPulseWaveForContext(this.audioContext);
+        this.organWave = this._createOrganWaveForContext(this.audioContext);
     }
     
     private _createReverbImpulseResponse(decay: number): AudioBuffer {
@@ -781,17 +1126,30 @@ class AudioEngine {
   }
 
   private _playDrumSample(sample: DrumSample, time: number) {
-      this._playDrumSampleOffline(this.audioContext, this.drumIn, sample, time);
+      this._playDrumSampleOffline(this.audioContext, this.drumIn, sample, time, this.drumTone);
   }
 
-  private _playDrumSampleOffline(context: BaseAudioContext, destination: AudioNode, sample: DrumSample, time: number) {
+  private _playDrumSampleOffline(context: BaseAudioContext, destination: AudioNode, sample: DrumSample, time: number, tone: number) {
+    if (!destination) return;
     switch (sample) {
       case 'kick': {
         const osc = context.createOscillator(); const gain = context.createGain();
         osc.connect(gain); gain.connect(destination);
-        osc.frequency.setValueAtTime(150, time); osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.1);
-        gain.gain.setValueAtTime(0.8, time); gain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
-        osc.start(time); osc.stop(time + 0.12);
+        
+        const startFreq = 60 + (tone * 90);
+        const endFreq = 0.01;
+        const duration = 0.25;
+
+        osc.frequency.setValueAtTime(startFreq, time); 
+        osc.frequency.exponentialRampToValueAtTime(endFreq, time + duration);
+        
+        gain.gain.setValueAtTime(0, time);
+        gain.gain.linearRampToValueAtTime(1.0, time + 0.005);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
+        gain.gain.linearRampToValueAtTime(0, time + duration + 0.01);
+        
+        osc.start(time); 
+        osc.stop(time + duration + 0.01);
         break;
       }
       case 'snare': {
@@ -801,18 +1159,26 @@ class AudioEngine {
         const data = buffer.getChannelData(0);
         for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
         noise.buffer = buffer;
-        const noiseFilter = context.createBiquadFilter(); noiseFilter.type = 'highpass'; noiseFilter.frequency.value = 1000;
+        const noiseFilter = context.createBiquadFilter(); 
+        noiseFilter.type = 'highpass'; 
+        noiseFilter.frequency.value = 800 + (tone * 1200);
         noise.connect(noiseFilter);
         const noiseGain = context.createGain();
         noiseFilter.connect(noiseGain); noiseGain.connect(destination);
-        noiseGain.gain.setValueAtTime(0.4, time); noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.08);
+        
+        noiseGain.gain.setValueAtTime(0, time);
+        noiseGain.gain.linearRampToValueAtTime(0.4, time + 0.005);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.08);
         noise.start(time); noise.stop(time + 0.08);
 
         const osc = context.createOscillator(); osc.type = 'triangle';
         const oscGain = context.createGain();
         osc.connect(oscGain); oscGain.connect(destination);
         osc.frequency.value = 100;
-        oscGain.gain.setValueAtTime(0.3, time); oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+        
+        oscGain.gain.setValueAtTime(0, time);
+        oscGain.gain.linearRampToValueAtTime(0.3, time + 0.005);
+        oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
         osc.start(time); osc.stop(time + 0.05);
         break;
       }
@@ -823,11 +1189,16 @@ class AudioEngine {
         const data = buffer.getChannelData(0);
         for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
         noise.buffer = buffer;
-        const noiseFilter = context.createBiquadFilter(); noiseFilter.type = 'highpass'; noiseFilter.frequency.value = 7000;
+        const noiseFilter = context.createBiquadFilter(); 
+        noiseFilter.type = 'highpass'; 
+        noiseFilter.frequency.value = 6000 + (tone * 3000);
         noise.connect(noiseFilter);
         const noiseGain = context.createGain();
         noiseFilter.connect(noiseGain); noiseGain.connect(destination);
-        noiseGain.gain.setValueAtTime(0.2, time); noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.03);
+        
+        noiseGain.gain.setValueAtTime(0, time);
+        noiseGain.gain.linearRampToValueAtTime(0.2, time + 0.005);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.03);
         noise.start(time); noise.stop(time + 0.03);
         break;
       }

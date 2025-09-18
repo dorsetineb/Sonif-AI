@@ -50,4 +50,5 @@ export const WAVEFORM_CONFIG: { [key in Waveform]: { name: string } } = {
   sawtooth: { name: 'Sintetizador' },
   triangle: { name: 'Flauta Suave' },
   pulse: { name: 'Pulso' },
+  organ: { name: 'Órgão' },
 };

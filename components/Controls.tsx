@@ -1,6 +1,4 @@
 import React from 'react';
-import type { Waveform } from '../types';
-import { WAVEFORM_CONFIG } from '../constants';
 
 interface ControlsProps {
   isPlaying: boolean;
@@ -9,43 +7,19 @@ interface ControlsProps {
   onClear: () => void;
   onExport: () => void;
   isExporting: boolean;
-  waveform: Waveform;
-  setWaveform: (waveform: Waveform) => void;
-  onPreviewWaveform: (waveform: Waveform) => void;
   isLooping: boolean;
   onToggleLoop: () => void;
   duration: number;
   onSetDuration: (duration: number) => void;
-  onToggleEffectsPanel: () => void;
 }
 
-const WaveformIcon: React.FC<{ type: Waveform }> = ({ type }) => {
-  const path = {
-    sine: 'M 0 12 C 4 0, 8 24, 12 12 S 20 0, 24 12',
-    square: 'M 0 6 H 12 V 18 H 24',
-    sawtooth: 'M 0 24 L 12 0 L 24 24 Z', // Filled
-    triangle: 'M 0 18 L 12 6 L 24 18 Z', // Filled
-    pulse: 'M 0 6 H 6 V 18 H 12 V 6 H 18 V 18 H 24',
-  }[type];
-
-  const isFilled = type === 'sawtooth' || type === 'triangle';
-
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill={isFilled ? "currentColor": "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d={path} />
-    </svg>
-  );
-};
-
-
 export const Controls: React.FC<ControlsProps> = ({
-  isPlaying, onPlay, onStop, onClear, onExport, isExporting, waveform, setWaveform, onPreviewWaveform, isLooping, onToggleLoop, duration, onSetDuration, onToggleEffectsPanel
+  isPlaying, onPlay, onStop, onClear, onExport, isExporting, isLooping, onToggleLoop, duration, onSetDuration
 }) => {
-  const waveforms = Object.keys(WAVEFORM_CONFIG) as Waveform[];
   const durations = [1, 2, 3, 4, 5];
 
   return (
-    <div className="flex flex-col items-center justify-center gap-4 w-full max-w-5xl mx-auto">
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 w-full max-w-5xl mx-auto">
       {/* Playback Controls */}
       <div className="flex items-center space-x-2">
         {!isPlaying ? (
@@ -82,42 +56,16 @@ export const Controls: React.FC<ControlsProps> = ({
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           )}
         </button>
-         <button 
-            onClick={onToggleEffectsPanel} 
-            className="p-3 bg-gray-600 text-white rounded-full hover:bg-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75" 
-            title="Efeitos"
-        >
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
-        </button>
       </div>
 
-      <div className="flex flex-col md:flex-row items-center gap-4">
-        {/* Duration Control */}
-        <div className="flex items-center space-x-2 bg-gray-700 rounded-lg p-1">
-          <span className="text-gray-300 font-medium px-2 text-sm">Duração</span>
-          {durations.map(d => (
-              <button key={d} onClick={() => onSetDuration(d)} className={`px-3 py-1.5 text-sm rounded-md font-semibold transition-colors ${duration === d ? 'bg-indigo-500 text-white' : 'text-gray-400 hover:bg-gray-600'}`}>
-                  {d}s
-              </button>
-          ))}
-        </div>
-
-        {/* Waveform Selector */}
-        <div className="flex items-center space-x-2 bg-gray-700 rounded-lg p-1">
-          {waveforms.map((w) => (
-            <button
-              key={w}
-              onClick={() => {
-                setWaveform(w);
-                onPreviewWaveform(w);
-              }}
-              className={`p-2 rounded-md transition-colors ${waveform === w ? 'bg-indigo-500 text-white' : 'text-gray-400 hover:bg-gray-600'}`}
-              title={WAVEFORM_CONFIG[w].name}
-            >
-              <WaveformIcon type={w} />
+      {/* Duration Control */}
+      <div className="flex items-center space-x-2 bg-gray-700 rounded-lg p-1">
+        <span className="text-gray-300 font-medium px-2 text-sm">Duração</span>
+        {durations.map(d => (
+            <button key={d} onClick={() => onSetDuration(d)} className={`px-3 py-1.5 text-sm rounded-md font-semibold transition-colors ${duration === d ? 'bg-indigo-500 text-white' : 'text-gray-400 hover:bg-gray-600'}`}>
+                {d}s
             </button>
-          ))}
-        </div>
+        ))}
       </div>
     </div>
   );

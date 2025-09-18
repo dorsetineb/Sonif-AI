@@ -1,4 +1,4 @@
-export type Waveform = 'sine' | 'square' | 'sawtooth' | 'triangle' | 'pulse';
+export type Waveform = 'sine' | 'square' | 'sawtooth' | 'triangle' | 'pulse' | 'organ';
 
 export interface Note {
   id: string;
@@ -23,6 +23,53 @@ export interface Composition {
   drums: DrumNote[];
 }
 
+export interface EffectDelay {
+  active: boolean;
+  time: number; // in seconds
+  feedback: number; // 0 to 1
+}
+
+export interface EffectCompressor {
+    active: boolean;
+    threshold: number; // dB
+    ratio: number;
+    attack: number; // seconds
+    release: number; // seconds
+}
+
+export interface BassEffectsState {
+  reverb: {
+    active: boolean;
+    decay: number; // seconds
+    wet: number; // mix
+  };
+  distortion: {
+    active: boolean;
+    drive: number; // 0 to 1
+  };
+  compressor: EffectCompressor;
+  chorus: {
+      active: boolean;
+      rate: number; // Hz
+      depth: number; // 0-1
+      delay: number; // ms
+  };
+}
+
+export interface DrumEffectsState {
+  delay: EffectDelay;
+  reverb: {
+    active: boolean;
+    decay: number; // seconds
+    wet: number; // mix
+  };
+  compressor: EffectCompressor;
+  filter: {
+      active: boolean;
+      frequency: number; // Hz
+      q: number; // resonance
+  };
+}
 
 export interface EffectsState {
   distortion: {
@@ -64,9 +111,5 @@ export interface EffectsState {
     decay: number; // seconds (0.1 to 5)
     wet: number; // 0 to 1 (mix)
   };
-  delay: {
-    active: boolean;
-    time: number; // in seconds
-    feedback: number; // 0 to 1
-  };
+  delay: EffectDelay;
 }
