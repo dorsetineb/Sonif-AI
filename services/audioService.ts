@@ -1,11 +1,14 @@
-import { Note, EffectsState } from '../types';
+import { Note, EffectsState, Composition, DrumNote, DrumSample } from '../types';
 
 class AudioEngine {
   private audioContext: AudioContext | null = null;
   private activeSources: (AudioBufferSourceNode | OscillatorNode)[] = [];
   
   // Master I/O
-  private masterIn: GainNode | null = null;
+  private masterIn: GainNode | null = null; // Melody input (goes to effects)
+  private bassIn: GainNode | null = null; // Bass input (bypasses effects)
+  private drumIn: GainNode | null = null; // Drum input (bypasses effects)
+  private masterOut: GainNode | null = null; // Final output gain
   
   // Effect Nodes & Controls
   private distortionInput: GainNode | null = null;
@@ -86,10 +89,15 @@ class AudioEngine {
     const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
     this.audioContext = ac;
     
-    this.masterIn = ac.createGain();
+    // Create track inputs and master output
+    this.masterIn = ac.createGain(); // Melody
+    this.bassIn = ac.createGain();
+    this.drumIn = ac.createGain();
+    this.masterOut = ac.createGain();
+
     let currentNode: AudioNode = this.masterIn;
 
-    // --- Create a FIXED, SEQUENTIAL effects chain with robust LFOs ---
+    // --- Create a FIXED, SEQUENTIAL effects chain for MELODY track ---
     
     // 1. Distortion
     this.distortionInput = ac.createGain();
@@ -221,7 +229,12 @@ class AudioEngine {
     currentNode.connect(this.reverbInput);
     currentNode = this.reverbOutput;
     
-    currentNode.connect(ac.destination);
+    // --- Connect all tracks to master out ---
+    currentNode.connect(this.masterOut); // Effects chain output
+    this.bassIn.connect(this.masterOut);
+    this.drumIn.connect(this.masterOut);
+    this.masterOut.connect(ac.destination);
+
     this._createCustomWaves();
   }
 
@@ -356,8 +369,8 @@ class AudioEngine {
     return mergedNotes;
   }
 
-  public playNotes(notes: Note[], effects: EffectsState): void {
-    if (!this.audioContext || this.audioContext.state !== 'running') {
+  public playComposition(composition: Composition, effects: EffectsState): void {
+    if (!this.audioContext || this.audioContext.state !== 'running' || !this.bassIn || !this.drumIn) {
       console.error("AudioContext not running. Call initAudioContext from a user gesture first.");
       return;
     }
@@ -366,26 +379,48 @@ class AudioEngine {
     
     this.stopAll();
     const now = this.audioContext.currentTime;
-    const notesToPlay = this.mergeConsecutiveNotes(notes);
-
-    notesToPlay.forEach(note => {
+    
+    // Play Melody
+    const melodyNotes = this.mergeConsecutiveNotes(composition.melody);
+    melodyNotes.forEach(note => {
       const gainNode = this.audioContext.createGain();
       gainNode.connect(this.masterIn);
-
       const source = this._createSoundSource(note, now + note.time, this.audioContext);
       source.connect(gainNode);
-      
       const attackTime = 0.005, releaseTime = 0.01, peakVolume = 0.25;
       const startTime = now + note.time, endTime = startTime + note.duration;
-
       gainNode.gain.setValueAtTime(0, startTime);
       gainNode.gain.linearRampToValueAtTime(peakVolume, startTime + attackTime);
       gainNode.gain.setValueAtTime(peakVolume, endTime - releaseTime);
       gainNode.gain.linearRampToValueAtTime(0, endTime);
-
       source.start(startTime);
       source.stop(endTime);
       this.activeSources.push(source);
+    });
+
+    // Play Bass
+    const bassNotes = this.mergeConsecutiveNotes(composition.bass);
+    bassNotes.forEach(note => {
+        const gainNode = this.audioContext.createGain();
+        gainNode.connect(this.bassIn);
+        const osc = this.audioContext.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(note.pitch, now + note.time);
+        osc.connect(gainNode);
+        const attackTime = 0.005, releaseTime = 0.01, peakVolume = 0.35;
+        const startTime = now + note.time, endTime = startTime + note.duration;
+        gainNode.gain.setValueAtTime(0, startTime);
+        gainNode.gain.linearRampToValueAtTime(peakVolume, startTime + attackTime);
+        gainNode.gain.setValueAtTime(peakVolume, endTime - releaseTime);
+        gainNode.gain.linearRampToValueAtTime(0, endTime);
+        osc.start(startTime);
+        osc.stop(endTime);
+        this.activeSources.push(osc);
+    });
+
+    // Play Drums
+    composition.drums.forEach(note => {
+        this._playDrumSample(note.sample, now + note.time);
     });
   }
   
@@ -439,16 +474,40 @@ class AudioEngine {
     source.stop(now + duration);
   }
 
-  public async exportToWav(notes: Note[], duration: number, effects: EffectsState): Promise<void> {
+  public playPreviewBassNote(pitch: number): void {
+      if (!this.audioContext || !this.bassIn) return;
+      const now = this.audioContext.currentTime;
+      const gainNode = this.audioContext.createGain();
+      gainNode.connect(this.bassIn);
+      const osc = this.audioContext.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(pitch, now);
+      osc.connect(gainNode);
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(0.35, now + 0.01);
+      gainNode.gain.linearRampToValueAtTime(0, now + 0.2);
+      osc.start(now);
+      osc.stop(now + 0.2);
+  }
+
+  public playPreviewDrumSample(sample: DrumSample): void {
+      if (!this.audioContext) return;
+      this._playDrumSample(sample, this.audioContext.currentTime);
+  }
+
+  public async exportToWav(composition: Composition, duration: number, effects: EffectsState): Promise<void> {
       if (!this.audioContext) {
-        // Create a temporary context for export if the main one doesn't exist.
         this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
       const sampleRate = this.audioContext.sampleRate;
       const offlineContext = new OfflineAudioContext(2, Math.ceil(duration * sampleRate), sampleRate);
       
-      const masterIn = offlineContext.createGain();
-      let currentNode: AudioNode = masterIn;
+      const masterOut = offlineContext.createGain();
+      masterOut.connect(offlineContext.destination);
+
+      // --- Create Melody Track with Effects ---
+      const melodyIn = offlineContext.createGain();
+      let currentNode: AudioNode = melodyIn;
       
       const effectChain: { [K in keyof EffectsState]: (input: AudioNode, output: AudioNode, eff: EffectsState[K]) => void } = {
           distortion: (input, output, eff) => {
@@ -582,39 +641,45 @@ class AudioEngine {
       const effectOrder: (keyof EffectsState)[] = ['distortion', 'panner', 'phaser', 'flanger', 'chorus', 'tremolo', 'delay', 'reverb'];
       for (const key of effectOrder) {
           const nextNode = offlineContext.createGain();
-          // FIX: Use a type assertion to resolve a complex TypeScript error.
-          // TypeScript cannot correlate the specific function signature from `effectChain[key]`
-          // with the corresponding config object from `effects[key]` inside a dynamic loop.
-          // Casting to `any` is a pragmatic way to bypass this check, as we know the types align.
           (effectChain[key] as any)(currentNode, nextNode, effects[key]);
           currentNode = nextNode;
       }
-      currentNode.connect(offlineContext.destination);
-
-      const notesToRender = this.mergeConsecutiveNotes(notes);
+      currentNode.connect(masterOut);
+      
       const pulseWave = this._createPulseWaveForContext(offlineContext);
-      notesToRender.forEach(note => {
-        const gainNode = offlineContext.createGain();
-        gainNode.connect(masterIn);
+      this.mergeConsecutiveNotes(composition.melody).forEach(note => {
+        const gainNode = offlineContext.createGain(); gainNode.connect(melodyIn);
         let source: OscillatorNode;
         if(note.waveform === 'pulse' && pulseWave){
-            source = offlineContext.createOscillator();
-            source.setPeriodicWave(pulseWave);
-            source.frequency.value = note.pitch;
+            source = offlineContext.createOscillator(); source.setPeriodicWave(pulseWave); source.frequency.value = note.pitch;
         } else {
-            source = offlineContext.createOscillator();
-            source.type = note.waveform as OscillatorType;
-            source.frequency.value = note.pitch;
+            source = offlineContext.createOscillator(); source.type = note.waveform as OscillatorType; source.frequency.value = note.pitch;
         }
         source.connect(gainNode);
         const attackTime = 0.005, releaseTime = 0.01, peakVolume = 0.25;
         const startTime = note.time, endTime = startTime + note.duration;
-        gainNode.gain.setValueAtTime(0, startTime);
-        gainNode.gain.linearRampToValueAtTime(peakVolume, startTime + attackTime);
-        gainNode.gain.setValueAtTime(peakVolume, endTime - releaseTime);
-        gainNode.gain.linearRampToValueAtTime(0, endTime);
-        source.start(startTime);
-        source.stop(endTime);
+        gainNode.gain.setValueAtTime(0, startTime); gainNode.gain.linearRampToValueAtTime(peakVolume, startTime + attackTime);
+        gainNode.gain.setValueAtTime(peakVolume, endTime - releaseTime); gainNode.gain.linearRampToValueAtTime(0, endTime);
+        source.start(startTime); source.stop(endTime);
+      });
+
+      // --- Create Bass Track ---
+      const bassIn = offlineContext.createGain(); bassIn.connect(masterOut);
+      this.mergeConsecutiveNotes(composition.bass).forEach(note => {
+          const gainNode = offlineContext.createGain(); gainNode.connect(bassIn);
+          const osc = offlineContext.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = note.pitch;
+          osc.connect(gainNode);
+          const attackTime = 0.005, releaseTime = 0.01, peakVolume = 0.35;
+          const startTime = note.time, endTime = startTime + note.duration;
+          gainNode.gain.setValueAtTime(0, startTime); gainNode.gain.linearRampToValueAtTime(peakVolume, startTime + attackTime);
+          gainNode.gain.setValueAtTime(peakVolume, endTime - releaseTime); gainNode.gain.linearRampToValueAtTime(0, endTime);
+          osc.start(startTime); osc.stop(endTime);
+      });
+
+      // --- Create Drum Track ---
+      const drumIn = offlineContext.createGain(); drumIn.connect(masterOut);
+      composition.drums.forEach(note => {
+          this._playDrumSampleOffline(offlineContext, drumIn, note.sample, note.time);
       });
 
       const renderedBuffer = await offlineContext.startRendering();
@@ -713,6 +778,60 @@ class AudioEngine {
       dataIndex++;
     }
     return new Blob([view], { type: 'audio/wav' });
+  }
+
+  private _playDrumSample(sample: DrumSample, time: number) {
+      this._playDrumSampleOffline(this.audioContext, this.drumIn, sample, time);
+  }
+
+  private _playDrumSampleOffline(context: BaseAudioContext, destination: AudioNode, sample: DrumSample, time: number) {
+    switch (sample) {
+      case 'kick': {
+        const osc = context.createOscillator(); const gain = context.createGain();
+        osc.connect(gain); gain.connect(destination);
+        osc.frequency.setValueAtTime(150, time); osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.1);
+        gain.gain.setValueAtTime(0.8, time); gain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+        osc.start(time); osc.stop(time + 0.12);
+        break;
+      }
+      case 'snare': {
+        const noise = context.createBufferSource();
+        const bufferSize = context.sampleRate * 0.1;
+        const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        noise.buffer = buffer;
+        const noiseFilter = context.createBiquadFilter(); noiseFilter.type = 'highpass'; noiseFilter.frequency.value = 1000;
+        noise.connect(noiseFilter);
+        const noiseGain = context.createGain();
+        noiseFilter.connect(noiseGain); noiseGain.connect(destination);
+        noiseGain.gain.setValueAtTime(0.4, time); noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.08);
+        noise.start(time); noise.stop(time + 0.08);
+
+        const osc = context.createOscillator(); osc.type = 'triangle';
+        const oscGain = context.createGain();
+        osc.connect(oscGain); oscGain.connect(destination);
+        osc.frequency.value = 100;
+        oscGain.gain.setValueAtTime(0.3, time); oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+        osc.start(time); osc.stop(time + 0.05);
+        break;
+      }
+      case 'hat': {
+        const noise = context.createBufferSource();
+        const bufferSize = context.sampleRate * 0.1;
+        const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        noise.buffer = buffer;
+        const noiseFilter = context.createBiquadFilter(); noiseFilter.type = 'highpass'; noiseFilter.frequency.value = 7000;
+        noise.connect(noiseFilter);
+        const noiseGain = context.createGain();
+        noiseFilter.connect(noiseGain); noiseGain.connect(destination);
+        noiseGain.gain.setValueAtTime(0.2, time); noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.03);
+        noise.start(time); noise.stop(time + 0.03);
+        break;
+      }
+    }
   }
 }
 

@@ -8,6 +8,22 @@ export interface Note {
   waveform: Waveform;
 }
 
+export type DrumSample = 'kick' | 'snare' | 'hat';
+
+export interface DrumNote {
+  id: string;
+  time: number; // in seconds
+  sample: DrumSample;
+  duration: number; // in seconds
+}
+
+export interface Composition {
+  melody: Note[];
+  bass: Note[];
+  drums: DrumNote[];
+}
+
+
 export interface EffectsState {
   distortion: {
     active: boolean;
